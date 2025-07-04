@@ -1,0 +1,6 @@
+---
+title: "DATA624 - Project 2"
+author: "Group 1"
+date: "2025-07-19"
+output: html_document
+---
