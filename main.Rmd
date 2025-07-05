@@ -5,92 +5,202 @@ date: "2025-07-19"
 output: html_document
 ---
 
+```{r, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(readxl)
+library(VIM)
+library(naniar)
+library(DataExplorer)
+library(caret)
+library(tidymodels)
+library(e1071)
+library(reshape2)
+library(lares)
+```
+
 ## Data
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
-library(tidyverse)
+# Download & load Data Dictionary
+download.file(
+  "https://github.com/hbedros/DATA624-Project2/raw/main/data/Data%20Columns%2C%20Types.xlsx",
+  destfile = "data_dict.xlsx", mode = "wb"
+)
+data_dict <- read_excel("data_dict.xlsx")
 
-data_dict <- read_csv("https://raw.githubusercontent.com/hbedros/DATA624-Project2/refs/heads/main/data/Data%20Columns%2C%20Types.csv")
+# Training Data
+download.file(
+  "https://raw.githubusercontent.com/lalaexplore/DATA-624/main/Project%202/studentdata_model.xlsx",
+  destfile = "train.xlsx", mode = "wb"
+)
+train_data <- read_excel("train.xlsx")
 
-train <- read_csv("https://raw.githubusercontent.com/hbedros/DATA624-Project2/refs/heads/main/data/StudentData%20-%20TO%20MODEL.csv")
+# Scoring Data
+download.file(
+  "https://github.com/hbedros/DATA624-Project2/raw/main/data/StudentEvaluation-%20TO%20PREDICT.xlsx",
+  destfile = "score.xlsx", mode = "wb"
+)
+score_data <- read_excel("score.xlsx")
 
-score <- read_csv("https://raw.githubusercontent.com/hbedros/DATA624-Project2/refs/heads/main/data/StudentEvaluation-%20TO%20PREDICT.csv")
+glimpse(train_data)
+summary(train_data$PH)
 
-head(data_dict)
-head(train)
-head(score)
+```
+## Initial EDA: Visualize the data
+```{r}
+summary(train_data)
 
-summary(train$PH)
+plot_histogram(train_data)
+plot_boxplot(train_data, by = 'PH')
+plot_qq(train_data)
 ```
 
-## EDA 
+## Check missing values
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
-sum(train$PH == 0)
+vis_miss(train_data)
+miss_var_summary(train_data)
+gg_miss_var(train_data)
 
-train %>% filter(PH == 0) # pH 0 is very acidic & unlikely in beverages, so dropping those records since imoputing is less common for the target variable
+## Drop rows with NA
+train_data <- train_data %>% filter(!is.na(PH))
 
-train <- train %>% filter(PH != 0)
+summary(train_data$PH)
+gg_miss_var(train_data)
 ```
 
-## EDA: Target variable
+## Impute missing predictors
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
-# Histogram of PH
-ggplot(train, aes(x = PH)) +
+# kNN imputation on predictors (PH is not imputed!)
+train_data$`Brand Code` <- as.factor(train_data$`Brand Code`)
+
+train_data <- kNN(train_data, k = 5, imp_var = FALSE)
+
+colSums(is.na(train_data))
+gg_miss_var(train_data)
+```
+
+## EDA: Target Variable
+```{r}
+ggplot(train_data, aes(x = PH)) +
   geom_histogram(bins = 30, fill = "steelblue", color = "white") +
   theme_minimal() +
   labs(title = "Distribution of PH", x = "PH", y = "Count")
 ```
-- The histogram shows that most pH values are between ~8.4 and ~8.7.
-- The distribution is fairly symmetric with a slight tail.
-
+- Most pH values are between ~8.4 and ~8.7.
+- Distribution is fairly symmetric with a slight tail.
 
 ## Looking at predictors
-#### Checking correlation of numeric predictors with PH:
+#### Checking top variables correlated with PH
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
-numeric_cols <- train %>%
-  select(where(is.numeric)) %>%
-  select(-PH)
+corr_cross(train_data, method = "spearman", max_pvalue = 0.05, top = 20, contains = 'PH')
+```
+- Top predictors: Mnf Flow, Bowl Setpoint, Usage cont, Filler Level.
 
-correlations <- cor(numeric_cols, train$PH, use = "complete.obs")
-correlations <- as.data.frame(correlations)
-correlations <- rownames_to_column(correlations, "Variable")
-correlations <- correlations %>%
+
+## Top Predictor: Mnf Flow
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Find top correlated variable
+numeric_cols <- train_data %>% select(where(is.numeric)) %>% select(-PH)
+
+correlations <- cor(numeric_cols, train_data$PH, use = "complete.obs") %>%
+  as.data.frame() %>%
+  rownames_to_column("Variable") %>%
   arrange(desc(abs(V1)))
 
-print(correlations)
-```
-
-## Scatter plot for those predictors
-```{r, echo=FALSE, message=FALSE, warning=FALSE}
 top_var <- correlations$Variable[1]
 
-ggplot(train, aes_string(x = paste0("`", top_var, "`"), y = "PH")) +
+ggplot(train_data, aes(x = !!sym(top_var), y = PH)) +
   geom_point(alpha = 0.5) +
   geom_smooth(method = "lm", se = FALSE, color = "red") +
   theme_minimal() +
   labs(title = paste("PH vs", top_var), x = top_var, y = "PH")
 ```
+- We observe extreme and clustered values for Mnf Flow, which we clean next.
 
-We see some extreme patterns in the Mnf Flow. We are checking and cleaning these extreme Mnf Flow values because outliers or invalid readings (such as negative or unusually high flows) can distort the model and obscure the true relationship between Mnf Flow and pH.
-
-### Cleaning Mnf Flow
-
-We impute the missing with median
-
+### Clean Mnf Flow
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
-train <- train %>%
+# Clean extremes
+train_data <- train_data %>%
   mutate(Mnf_Flow_Clean = ifelse(`Mnf Flow` < 0 | `Mnf Flow` > 250, NA, `Mnf Flow`))
 
+# Impute cleaned values with median
+median_flow <- median(train_data$Mnf_Flow_Clean, na.rm = TRUE)
 
-median_flow <- median(train$Mnf_Flow_Clean, na.rm = TRUE)
-train <- train %>%
+train_data <- train_data %>%
   mutate(Mnf_Flow_Clean = ifelse(is.na(Mnf_Flow_Clean), median_flow, Mnf_Flow_Clean))
 
-ggplot(train, aes(x = Mnf_Flow_Clean, y = PH)) +
+ggplot(train_data, aes(x = Mnf_Flow_Clean, y = PH)) +
   geom_point(alpha = 0.5) +
   geom_smooth(method = "lm", se = FALSE, color = "red") +
   theme_minimal() +
-  labs(title = "PH vs Mnf Flow (cleaned)", x = "Cleaned Mnf Flow", y = "PH")
+  labs(title = "PH vs Cleaned Mnf Flow", x = "Cleaned Mnf Flow", y = "PH")
+```
+
+The cleaned data shows a weak positive relationship between Mnf Flow and pH, likely reflecting some operational influence. However, given the clustered, discrete flow settings and the weak effect, we explored the other top predictors, Bowl Setpoint, Usage cont, and Filler Level, to identify stronger relationships.
+
+```{r}
+top_vars <- c("Bowl Setpoint", "Usage cont", "Filler Level")
+
+for (var in top_vars) {
+  print(
+    ggplot(train_data, aes(x = !!sym(var), y = PH)) +
+      geom_point(alpha = 0.5) +
+      geom_smooth(method = "lm", se = FALSE, color = "red") +
+      theme_minimal() +
+      labs(title = paste("PH vs", var), x = var, y = "PH")
+  )
+}
 
 ```
 
-After cleaning invalid Mnf Flow values, we observed that the variable still exhibits strong clustering at discrete flow rates (e.g., 137, 139, 140). This pattern reflects standard operating procedures where flow is set to specific allowable levels rather than varying continuously. These repeated values explain the vertical patterns observed in the scatterplots.
+#### Other Top Predictors
+
+- Bowl Setpoint: Weak positive relationship with pH - higher setpoints slightly increase pH, possibly by improving control or mixing.
+
+- Usage cont: Weak negative relationship with pH - higher usage levels are associated with slightly lower pH, which may reflect depletion or wear effects.
+
+- Filler Level: Weak positive relationship with pH - higher filler levels correspond to slightly higher pH, perhaps due to more stable process conditions.
+
+No single variable among these showed a strong effect. This suggests that pH is influenced by a combination of factors, prompting further exploration of CO₂- and temperature-related variables.
+
+## CO₂ & Temperature Variables
+
+We examined variables logically tied to pH, including Carb Volume, Carb Pressure, Carb Flow, PSC CO₂, Carb Temp, and Temperature. Their Spearman correlations with pH were:
+```{r}
+co2_temp_vars <- c("Carb Volume", "Carb Pressure", "Carb Flow", "PSC CO2", 
+                   "Carb Temp", "Temperature")
+
+cor_df <- map_dfr(
+  co2_temp_vars,
+  ~ tibble(
+      Variable = .x,
+      Spearman = cor(train_data[[.x]], train_data$PH, method = "spearman", use = "complete.obs")
+  )
+) %>% arrange(desc(abs(Spearman)))
+
+print(cor_df)
+```
+
+We also visualized the top three (Temperature, PSC CO₂, Carb Pressure):
+
+- Temperature: Weak negative trend — higher temperatures slightly lower pH, consistent with CO₂ solubility decreasing at higher temperatures.
+
+- PSC CO₂: Very weak negative trend — higher CO₂ levels lower pH, as dissolved CO₂ forms carbonic acid.
+
+- Carb Pressure: Very weak positive trend — possibly due to operational settings or confounding factors.
+
+```{r}
+top_co2_temp <- cor_df$Variable[1:3]
+
+for (var in top_co2_temp) {
+  print(
+    ggplot(train_data, aes(x = !!sym(var), y = PH)) +
+      geom_point(alpha = 0.5) +
+      geom_smooth(method = "lm", se = FALSE, color = "red") +
+      theme_minimal() +
+      labs(title = paste("PH vs", var), x = var, y = "PH")
+  )
+}
+
+```
+
+These CO₂ and temperature-related variables show weak but expected relationships with pH, supporting the hypothesis that pH depends on both gas solubility and process conditions. However, none of the variables individually explain much variance, suggesting that pH control is multivariate, and a predictive model that combines these factors may provide better insight and predictive power.
