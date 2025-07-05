@@ -6,7 +6,7 @@ output: html_document
 ---
 
 ## Data
-```{r, echo=FALSE}
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
 library(tidyverse)
 
 data_dict <- read_csv("https://raw.githubusercontent.com/hbedros/DATA624-Project2/refs/heads/main/data/Data%20Columns%2C%20Types.csv")
@@ -21,26 +21,31 @@ head(score)
 
 summary(train$PH)
 ```
+
 ## EDA 
-```{r, echo=FALSE}
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
 sum(train$PH == 0)
 
 train %>% filter(PH == 0) # pH 0 is very acidic & unlikely in beverages, so dropping those records since imoputing is less common for the target variable
 
 train <- train %>% filter(PH != 0)
 ```
+
 ## EDA: Target variable
-```{r}
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
 # Histogram of PH
 ggplot(train, aes(x = PH)) +
   geom_histogram(bins = 30, fill = "steelblue", color = "white") +
   theme_minimal() +
   labs(title = "Distribution of PH", x = "PH", y = "Count")
 ```
+- The histogram shows that most pH values are between ~8.4 and ~8.7.
+- The distribution is fairly symmetric with a slight tail.
+
 
 ## Looking at predictors
 #### Checking correlation of numeric predictors with PH:
-```{r}
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
 numeric_cols <- train %>%
   select(where(is.numeric)) %>%
   select(-PH)
@@ -55,10 +60,37 @@ print(correlations)
 ```
 
 ## Scatter plot for those predictors
-```{r}
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+top_var <- correlations$Variable[1]
+
 ggplot(train, aes_string(x = paste0("`", top_var, "`"), y = "PH")) +
   geom_point(alpha = 0.5) +
   geom_smooth(method = "lm", se = FALSE, color = "red") +
   theme_minimal() +
   labs(title = paste("PH vs", top_var), x = top_var, y = "PH")
 ```
+
+We see some extreme patterns in the Mnf Flow. We are checking and cleaning these extreme Mnf Flow values because outliers or invalid readings (such as negative or unusually high flows) can distort the model and obscure the true relationship between Mnf Flow and pH.
+
+### Cleaning Mnf Flow
+
+We impute the missing with median
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+train <- train %>%
+  mutate(Mnf_Flow_Clean = ifelse(`Mnf Flow` < 0 | `Mnf Flow` > 250, NA, `Mnf Flow`))
+
+
+median_flow <- median(train$Mnf_Flow_Clean, na.rm = TRUE)
+train <- train %>%
+  mutate(Mnf_Flow_Clean = ifelse(is.na(Mnf_Flow_Clean), median_flow, Mnf_Flow_Clean))
+
+ggplot(train, aes(x = Mnf_Flow_Clean, y = PH)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  theme_minimal() +
+  labs(title = "PH vs Mnf Flow (cleaned)", x = "Cleaned Mnf Flow", y = "PH")
+
+```
+
+After cleaning invalid Mnf Flow values, we observed that the variable still exhibits strong clustering at discrete flow rates (e.g., 137, 139, 140). This pattern reflects standard operating procedures where flow is set to specific allowable levels rather than varying continuously. These repeated values explain the vertical patterns observed in the scatterplots.
