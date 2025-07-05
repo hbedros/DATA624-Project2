@@ -68,6 +68,7 @@ gg_miss_var(train_data)
 ```
 
 ## Impute missing predictors
+We used kNN to impute missing predictor values because it preserves relationships between variables and is more robust than simple mean or median imputation.
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
 # kNN imputation on predictors (PH is not imputed!)
 train_data$`Brand Code` <- as.factor(train_data$`Brand Code`)
@@ -117,6 +118,7 @@ ggplot(train_data, aes(x = !!sym(top_var), y = PH)) +
 - We observe extreme and clustered values for Mnf Flow, which we clean next.
 
 ### Clean Mnf Flow
+We replaced extreme or invalid Mnf Flow values with the median to avoid skewing the model with outliers while keeping the data within realistic operational ranges.
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
 # Clean extremes
 train_data <- train_data %>%
