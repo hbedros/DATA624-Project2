@@ -4,3 +4,61 @@ author: "Group 1"
 date: "2025-07-19"
 output: html_document
 ---
+
+## Data
+```{r, echo=FALSE}
+library(tidyverse)
+
+data_dict <- read_csv("https://raw.githubusercontent.com/hbedros/DATA624-Project2/refs/heads/main/data/Data%20Columns%2C%20Types.csv")
+
+train <- read_csv("https://raw.githubusercontent.com/hbedros/DATA624-Project2/refs/heads/main/data/StudentData%20-%20TO%20MODEL.csv")
+
+score <- read_csv("https://raw.githubusercontent.com/hbedros/DATA624-Project2/refs/heads/main/data/StudentEvaluation-%20TO%20PREDICT.csv")
+
+head(data_dict)
+head(train)
+head(score)
+
+summary(train$PH)
+```
+## EDA 
+```{r, echo=FALSE}
+sum(train$PH == 0)
+
+train %>% filter(PH == 0) # pH 0 is very acidic & unlikely in beverages, so dropping those records since imoputing is less common for the target variable
+
+train <- train %>% filter(PH != 0)
+```
+## EDA: Target variable
+```{r}
+# Histogram of PH
+ggplot(train, aes(x = PH)) +
+  geom_histogram(bins = 30, fill = "steelblue", color = "white") +
+  theme_minimal() +
+  labs(title = "Distribution of PH", x = "PH", y = "Count")
+```
+
+## Looking at predictors
+#### Checking correlation of numeric predictors with PH:
+```{r}
+numeric_cols <- train %>%
+  select(where(is.numeric)) %>%
+  select(-PH)
+
+correlations <- cor(numeric_cols, train$PH, use = "complete.obs")
+correlations <- as.data.frame(correlations)
+correlations <- rownames_to_column(correlations, "Variable")
+correlations <- correlations %>%
+  arrange(desc(abs(V1)))
+
+print(correlations)
+```
+
+## Scatter plot for those predictors
+```{r}
+ggplot(train, aes_string(x = paste0("`", top_var, "`"), y = "PH")) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  theme_minimal() +
+  labs(title = paste("PH vs", top_var), x = top_var, y = "PH")
+```
