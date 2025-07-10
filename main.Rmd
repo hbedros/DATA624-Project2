@@ -2,7 +2,9 @@
 title: "DATA624 - Project 2"
 author: "Group 1"
 date: "2025-07-19"
-output: html_document
+output:
+  html_document: default
+  pdf_document: default
 ---
 
 ```{r, message=FALSE, warning=FALSE}
@@ -33,6 +35,12 @@ download.file(
   destfile = "train.xlsx", mode = "wb"
 )
 train_data <- read_excel("train.xlsx")
+
+# Replace NA in Brand Code with "M"
+train_data$`Brand Code` <- as.character(train_data$`Brand Code`)
+train_data$`Brand Code`[is.na(train_data$`Brand Code`)] <- "M"
+train_data$`Brand Code` <- as.factor(train_data$`Brand Code`)
+
 
 # Scoring Data
 download.file(
@@ -70,13 +78,25 @@ gg_miss_var(train_data)
 ## Impute missing predictors
 We used kNN to impute missing predictor values because it preserves relationships between variables and is more robust than simple mean or median imputation.
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
-# kNN imputation on predictors (PH is not imputed!)
+library(VIM)
+
+# Make sure Brand Code is a factor
 train_data$`Brand Code` <- as.factor(train_data$`Brand Code`)
 
-train_data <- kNN(train_data, k = 5, imp_var = FALSE)
+# Run kNN only on the specific variables that have missing values,
+# and explicitly exclude Brand Code
+vars_to_impute <- names(train_data)[names(train_data) != "Brand Code"]
 
-colSums(is.na(train_data))
-gg_miss_var(train_data)
+train_data_imputed <- kNN(
+  train_data,
+  variable = vars_to_impute,
+  k = 5,
+  imp_var = FALSE
+)
+
+# Double-check Brand Code
+table(train_data_imputed$`Brand Code`)
+
 ```
 
 ## EDA: Target Variable
@@ -157,6 +177,9 @@ for (var in top_vars) {
 #### Other Top Predictors
 
 - Bowl Setpoint: Weak positive relationship with pH - higher setpoints slightly increase pH, possibly by improving control or mixing.
+```{r}
+
+```
 
 - Usage cont: Weak negative relationship with pH - higher usage levels are associated with slightly lower pH, which may reflect depletion or wear effects.
 
