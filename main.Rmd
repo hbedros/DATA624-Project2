@@ -77,26 +77,19 @@ gg_miss_var(train_data)
 
 ## Impute missing predictors
 We used kNN to impute missing predictor values because it preserves relationships between variables and is more robust than simple mean or median imputation.
+
+Note: We explicitly exclude Brand Code from imputation, keeping M as-is.
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
-library(VIM)
 
-# Make sure Brand Code is a factor
-train_data$`Brand Code` <- as.factor(train_data$`Brand Code`)
-
-# Run kNN only on the specific variables that have missing values,
-# and explicitly exclude Brand Code
-vars_to_impute <- names(train_data)[names(train_data) != "Brand Code"]
-
-train_data_imputed <- kNN(
+# Run kNN, exclude Brand Code
+train_data <- kNN(
   train_data,
-  variable = vars_to_impute,
+  variable = setdiff(names(train_data), "Brand Code"),
   k = 5,
   imp_var = FALSE
 )
 
-# Double-check Brand Code
-table(train_data_imputed$`Brand Code`)
-
+table(train_data$`Brand Code`)
 ```
 
 ## EDA: Target Variable
@@ -119,7 +112,6 @@ corr_cross(train_data, method = "spearman", max_pvalue = 0.05, top = 20, contain
 
 ## Top Predictor: Mnf Flow
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
-# Find top correlated variable
 numeric_cols <- train_data %>% select(where(is.numeric)) %>% select(-PH)
 
 correlations <- cor(numeric_cols, train_data$PH, use = "complete.obs") %>%
